@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Exception;
 
 class AuthController extends Controller
 {
@@ -19,26 +20,31 @@ class AuthController extends Controller
     // Menangani proses Register
     public function register(Request $request)
     {
-        // 1. Validasi Input
-        $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-        ]);
+        try {
+            // 1. Validasi Input
+            $validated = $request->validate([
+                'name' => ['required', 'string', 'max:255'],
+                'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+                'password' => ['required', 'string', 'min:8', 'confirmed'],
+            ]);
 
-        // 2. Buat User baru (role default 'user' sudah diset di migrasi)
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            // Password dienkripsi otomatis oleh $casts di Model User
-            'password' => Hash::make($request->password), 
-            'role' => 'user', // Set default role
-        ]);
+            // 2. Buat User baru
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'role' => 'user',
+            ]);
 
-        // 3. Langsung login setelah register
-        Auth::login($user);
+            // 3. Langsung login setelah register
+            Auth::login($user);
 
-        return redirect()->route('dashboard');
+            return redirect()->route('dashboard')->with('success', 'Pendaftaran berhasil! Selamat datang.');
+        } catch (ValidationException $e) {
+            return back()->withErrors($e->errors())->withInput();
+        } catch (Exception $e) {
+            return back()->with('error', 'Terjadi kesalahan saat pendaftaran. Silakan coba lagi.')->withInput();
+        }
     }
 
     // Menampilkan halaman Login
@@ -50,34 +56,41 @@ class AuthController extends Controller
     // Menangani proses Login
     public function login(Request $request)
     {
-        // 1. Validasi Input
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required'],
-        ]);
+        try {
+            // 1. Validasi Input
+            $credentials = $request->validate([
+                'email' => ['required', 'email'],
+                'password' => ['required'],
+            ]);
 
-        // 2. Coba autentikasi
-        if (Auth::attempt($credentials, $request->boolean('remember'))) {
-            $request->session()->regenerate();
+            // 2. Coba autentikasi
+            if (Auth::attempt($credentials, $request->boolean('remember'))) {
+                $request->session()->regenerate();
+                return redirect()->intended('/dashboard')->with('success', 'Login berhasil!');
+            }
 
-            // 3. Redirect ke dashboard (logika redirect per role ada di DashboardController)
-            return redirect()->intended('/dashboard');
+            // Login gagal
+            throw ValidationException::withMessages([
+                'email' => ['Kredensial yang diberikan tidak cocok dengan catatan kami.'],
+            ]);
+        } catch (ValidationException $e) {
+            return back()->withErrors($e->errors())->withInput();
+        } catch (Exception $e) {
+            return back()->with('error', 'Terjadi kesalahan saat login. Silakan coba lagi.')->withInput();
         }
-
-        // Jika gagal, kembalikan dengan error
-        throw ValidationException::withMessages([
-            'email' => ['Kredensial yang diberikan tidak cocok dengan catatan kami.'],
-        ]);
     }
 
     // Menangani proses Logout
     public function logout(Request $request)
     {
-        Auth::logout();
+        try {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
 
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        return redirect('/');
+            return redirect('/')->with('success', 'Logout berhasil!');
+        } catch (Exception $e) {
+            return redirect('/')->with('error', 'Terjadi kesalahan saat logout.');
+        }
     }
 }
